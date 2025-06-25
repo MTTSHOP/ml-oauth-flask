@@ -165,6 +165,9 @@ def get_me():
 
     return response.json()
 
+@app.route("/debug_db")
+def debug_db():
+    return f"Caminho absoluto do banco: <code>{DB_PATH}</code>"
 # Configuração de execução compatível com Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
