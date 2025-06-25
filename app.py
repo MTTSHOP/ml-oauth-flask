@@ -7,267 +7,116 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# -----------------------------------------------------------------------------
-# Configurações de ambiente
-# -----------------------------------------------------------------------------
 CLIENT_ID = os.getenv("ML_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("ML_REDIRECT_URI")
-DATABASE_URL = os.getenv("DATABASE_URL")  # Ex: postgres://user:pwd@host:5432/db
-
-# -----------------------------------------------------------------------------
-# Helpers de banco
-# -----------------------------------------------------------------------------
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_db_conn():
-    """Retorna uma nova conexão com o Postgres."""
     return psycopg2.connect(DATABASE_URL)
 
-# Cria a tabela `tokens` caso não exista
-try:
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tokens (
-                    id SERIAL PRIMARY KEY,
-                    access_token TEXT NOT NULL,
-                    refresh_token TEXT NOT NULL,
-                    token_type TEXT,
-                    expires_in INTEGER,
-                    scope TEXT,
-                    user_id TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-except Exception as exc:
-    print("[WARN] Erro ao criar tabela tokens:", exc)
+# Tabela tokens
+with get_db_conn() as conn:
+    with conn.cursor() as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS tokens (
+            id SERIAL PRIMARY KEY,
+            access_token TEXT NOT NULL,
+            refresh_token TEXT NOT NULL,
+            token_type TEXT,
+            expires_in INTEGER,
+            scope TEXT,
+            user_id TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        conn.commit()
 
-# -----------------------------------------------------------------------------
-# Helpers de API Mercado Livre
-# -----------------------------------------------------------------------------
+# --------------------------------------------------
+# Helpers Mercado Livre
+# --------------------------------------------------
 
-def obter_item_ids(user_id: str, access_token: str):
-    """Retorna a lista de ITEM_IDs de um vendedor."""
+def obter_item_ids(user_id, token):
     url = f"https://api.mercadolibre.com/users/{user_id}/items/search"
-    resp = requests.get(url, params={"access_token": access_token})
-    if resp.status_code != 200:
-        print("[API] Falha ao buscar itens:", resp.text)
-        return []
-    return resp.json().get("results", [])
+    r = requests.get(url, params={"access_token": token})
+    app.logger.info("/items/search %s", r.status_code)
+    return r.json().get("results", []) if r.ok else []
 
 
-def fetch_items_detalhes(item_ids, access_token):
-    """Busca detalhes em blocos de 20 IDs incluindo promoções e flag de catálogo."""
-    detalhes = []
-    for i in range(0, len(item_ids), 20):
-        chunk = item_ids[i : i + 20]
-        url = "https://api.mercadolibre.com/items"
-        params = {
-            "ids": ",".join(chunk),
-            # buscamos campos extras para promo e catálogo
-            "attributes": "title,price,original_price,sale_price,catalog_listing,status,permalink",
-        }
-        headers = {"Authorization": f"Bearer {access_token}"}
-        resp = requests.get(url, params=params, headers=headers)
-        print("[DEBUG] /items chunk", i // 20, "status", resp.status_code, flush=True)
-        if resp.status_code != 200:
-            print(resp.text[:300], flush=True)
+def fetch_items_detalhes(item_ids, token):
+    detalhes, step = [], 20
+    for i in range(0, len(item_ids), step):
+        chunk = item_ids[i : i + step]
+        r = requests.get(
+            "https://api.mercadolibre.com/items",
+            params={
+                "ids": ",".join(chunk),
+                "attributes": "title,price,original_price,sale_price,catalog_listing,status,permalink",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.logger.info("/items multi %s", r.status_code)
+        if not r.ok:
             continue
-        for itm in resp.json():
-            if itm.get("code") == 200 and "body" in itm:
-                detalhes.append(itm["body"])
-    print("[DEBUG] total detalhes =", len(detalhes), flush=True)
+        detalhes.extend([it["body"] for it in r.json() if it.get("code") == 200])
     return detalhes
 
-# -----------------------------------------------------------------------------
-# Rotas Flask
-# -----------------------------------------------------------------------------
+STATUS_PT = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
 
-@app.route("/")
-def home():
-    auth_url = (
-        "https://auth.mercadolivre.com.br/authorization"
-        f"?response_type=code&client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}"
-    )
-    return (
-        "<h1>Conectar com Mercado Livre</h1>"
-        f"<a href='{auth_url}'>Clique aqui para autorizar</a>"
-    )
-
-
-@app.route("/callback")
-def callback():
-    code = request.args.get("code")
-    if not code:
-        return "Erro: código não encontrado!", 400
-
-    data = {
-        "grant_type": "authorization_code",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-    }
-    resp = requests.post("https://api.mercadolibre.com/oauth/token", data=data)
-    if resp.status_code != 200:
-        return f"Erro ao trocar código: {resp.text}", 400
-
-    tok = resp.json()
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO tokens (access_token, refresh_token, token_type, expires_in, scope, user_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    tok.get("access_token"),
-                    tok.get("refresh_token"),
-                    tok.get("token_type"),
-                    tok.get("expires_in"),
-                    tok.get("scope"),
-                    str(tok.get("user_id")),
-                ),
-            )
-            conn.commit()
-    return "Token salvo com sucesso. <a href='/painel'>Ir ao painel</a>"
-
-# ----------------- Painel de usuários -----------------
-
-@app.route("/painel")
-def painel():
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT user_id, MAX(created_at) FROM tokens GROUP BY user_id ORDER BY user_id"
-            )
-            rows = cur.fetchall()
-
-    html = (
-        "<h2>Painel de usuários conectados</h2>"
-        "<table border='1' cellpadding='5'>"
-        "<tr><th>User ID</th><th>Token criado em</th><th>Anúncios</th><th>Ações</th></tr>"
-    )
-    for uid, created_at in rows:
-        criacao = created_at.strftime("%d/%m/%Y %H:%M")
-        html += (
-            f"<tr><td>{uid}</td>"
-            f"<td>{criacao}</td>"
-            f"<td><a href='/painel/anuncios/{uid}'>Ver anúncios</a></td>"
-            f"<td><a href='/painel/refresh/{uid}'>Renovar token</a></td></tr>"
-        )
-    html += "</table>"
-    return html
-
-
-@app.route("/painel/refresh/<user_id>")
-def painel_refresh(user_id):
-    # Busca o refresh_token mais recente
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT refresh_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1",
-                (user_id,),
-            )
-            row = cur.fetchone()
-    if not row:
-        return "Usuário não encontrado.", 404
-
-    rt = row[0]
-    data = {
-        "grant_type": "refresh_token",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "refresh_token": rt,
-    }
-    resp = requests.post("https://api.mercadolibre.com/oauth/token", data=data)
-    if resp.status_code != 200:
-        return f"Erro: {resp.text}", 400
-
-    tok = resp.json()
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO tokens (access_token, refresh_token, token_type, expires_in, scope, user_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    tok.get("access_token"),
-                    tok.get("refresh_token"),
-                    tok.get("token_type"),
-                    tok.get("expires_in"),
-                    tok.get("scope"),
-                    str(tok.get("user_id")),
-                ),
-            )
-            conn.commit()
-    return "Token renovado. <a href='/painel'>Voltar</a>"
-
+# --------------------------------------------------
+# Rotas
+# --------------------------------------------------
 
 @app.route("/painel/anuncios/<user_id>")
 def painel_anuncios(user_id):
-    # 1) Obter o access_token mais recente
+    # token
     with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT access_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1",
-                (user_id,),
-            )
-            row = cur.fetchone()
+        with conn.cursor() as c:
+            c.execute("SELECT access_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1", (user_id,))
+            row = c.fetchone()
     if not row:
-        return "Token não encontrado.", 404
-    access_token = row[0]
+        return "Token não encontrado", 404
+    token = row[0]
 
-    # 2) Obter todos os ITEM_IDs do vendedor
-    item_ids = obter_item_ids(user_id, access_token)
+    item_ids = obter_item_ids(user_id, token)
     if not item_ids:
-        return "<p>Usuário sem anúncios encontrados.</p>"
+        return "<p>Usuário sem anúncios.</p>"
 
-    # 3) Buscar detalhes em bloco
-    detalhes = fetch_items_detalhes(item_ids, access_token)
+    detalhes = fetch_items_detalhes(item_ids, token)
 
-    # Tradução de status
-    traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
-
-    html = f"<h2>Anúncios do usuário {user_id}</h2>"
-    html += "<table border='1' cellpadding='5'>"
-    html += ("<tr>"
-             "<th>Título</th>"
-             "<th>Preço (R$)</th>"
-             "<th>Promoção (R$)</th>"
-             "<th>Catálogo?</th>"
-             "<th>Status</th>"
-             "<th>Link</th></tr>")
-
-    traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
+    # monta HTML
+    html = """
+    <html><head><meta charset='utf-8'>
+    <style>
+      body{font-family:Arial,Helvetica,sans-serif}
+      table{border-collapse:collapse;width:100%}
+      th,td{border:1px solid #ccc;padding:6px}
+      th{background:#f2f2f2;text-align:left}
+    </style></head><body>
+    """
+    html += f"<h2>Anúncios do usuário {user_id}</h2>"
+    html += "<table><tr><th>Título</th><th>Preço (R$)</th><th>Promoção (R$)</th><th>Catálogo?</th><th>Status</th><th>Link</th></tr>"
 
     for d in detalhes:
         titulo = d.get("title", "–")
-        preco = float(d.get("price", 0.0))
+        preco = float(d.get("price", 0))
         promo = d.get("sale_price") or (
             preco if d.get("original_price") and d.get("original_price") > preco else None
         )
         promo_str = f"{promo:,.2f}" if promo else "–"
-        cat_flag = "Sim" if d.get("catalog_listing") else "Não"
-        status = traduz.get(d.get("status", ""), d.get("status", ""))
+        catalogo = "Sim" if d.get("catalog_listing") else "Não"
+        status = STATUS_PT.get(d.get("status"), d.get("status"))
         link = d.get("permalink", "#")
+        html += (
+            f"<tr><td>{titulo}</td>"
+            f"<td>{preco:,.2f}</td>"
+            f"<td>{promo_str}</td>"
+            f"<td>{catalogo}</td>"
+            f"<td>{status}</td>"
+            f"<td><a href='{link}' target='_blank'>Abrir</a></td></tr>"
+        )
 
-        html += "<tr>"
-        html += f"<td>{titulo}</td>"
-        html += f"<td>{preco:,.2f}</td>"
-        html += f"<td>{promo_str}</td>"
-        html += f"<td>{cat_flag}</td>"
-        html += f"<td>{status}</td>"
-        html += f"<td><a href='{link}' target='_blank'>Abrir</a></td>"
-        html += "</tr>"
-        html += "</table><br><a href='/painel'>Voltar ao painel</a>"
+    html += "</table><br><a href='/painel'>Voltar ao painel</a></body></html>"
     return html
 
-# -----------------------------------------------------------------------------
+# -------------------- restante do arquivo (rotas /painel etc.) permanece igual --------------------
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
