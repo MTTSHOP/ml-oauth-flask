@@ -76,7 +76,7 @@ def fetch_items_detalhes(item_ids: list[str]):
         resp = requests.get(url, params=params)
        
         if resp.status_code != 200:
-            print("[API] Erro /items:", resp.text)
+            print("[API] Erro /items:", resp.status_code, resp.text)
             continue
         for itm in resp.json():
             if itm.get("code") == 200 and "body" in itm:
