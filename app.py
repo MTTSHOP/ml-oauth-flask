@@ -53,6 +53,7 @@ def obter_item_ids(user_id: str, access_token: str):
     """Retorna a lista de ITEM_IDs de um vendedor."""
     url = f"https://api.mercadolibre.com/users/{user_id}/items/search"
     resp = requests.get(url, params={"access_token": access_token})
+    print("[DEBUG] /items/search status:", resp.status_code, resp.text[:200])
     if resp.status_code != 200:
         print("[API] Falha ao buscar itens:", resp.text)
         return []
@@ -71,7 +72,7 @@ def fetch_items_detalhes(item_ids: list[str]):
             "attributes": "title,price,status,permalink",
         }
         resp = requests.get(url, params=params)
-        print("[DEBUG] /items/search status:", resp.status_code, resp.text[:200])
+       
         if resp.status_code != 200:
             print("[API] Erro /items:", resp.text)
             continue
@@ -221,13 +222,15 @@ def painel_anuncios(user_id):
     access_token = row[0]
 
     # 2) Obter todos os ITEM_IDs do vendedor
+    print('Vai Chamar')
     item_ids = obter_item_ids(user_id, access_token)
+    print('chamou')
     if not item_ids:
         return "<p>Usuário sem anúncios encontrados.</p>"
-    print('Vai Chamar')
+    
     # 3) Buscar detalhes em bloco
     detalhes = fetch_items_detalhes(item_ids)
-    print('chamou')
+    
 
     # Tradução de status
     traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
