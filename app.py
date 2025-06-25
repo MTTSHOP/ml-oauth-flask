@@ -82,6 +82,53 @@ def callback():
 
     return f"<h3>Token salvo com sucesso para user_id: {token_info.get('user_id')}</h3>"
 
+@app.route("/refresh_token")
+def refresh_token():
+    # Pega o último refresh_token salvo no banco
+    conn = sqlite3.connect("tokens.db")
+    c = conn.cursor()
+    c.execute("SELECT refresh_token FROM tokens ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return "Nenhum refresh_token encontrado no banco de dados.", 404
+
+    refresh_token_value = row[0]
+
+    # Requisição para renovar o token
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "refresh_token": refresh_token_value
+    }
+
+    response = requests.post("https://api.mercadolibre.com/oauth/token", data=data)
+    if response.status_code != 200:
+        return f"Erro ao renovar token: {response.text}", 400
+
+    token_info = response.json()
+
+    # Salva novo token no banco
+    conn = sqlite3.connect("tokens.db")
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO tokens (access_token, refresh_token, token_type, expires_in, scope, user_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (
+        token_info.get("access_token"),
+        token_info.get("refresh_token"),
+        token_info.get("token_type"),
+        token_info.get("expires_in"),
+        token_info.get("scope"),
+        token_info.get("user_id")
+    ))
+    conn.commit()
+    conn.close()
+
+    return f"<h3>Token renovado com sucesso para user_id: {token_info.get('user_id')}</h3>"
+
 # Configuração de execução compatível com Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
