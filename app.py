@@ -210,17 +210,20 @@ def painel_refresh(user_id):
 @app.route("/painel/anuncios/<user_id>")
 def painel_anuncios(user_id):
     # 1) Obter o access_token mais recente
+    print('Vai conn')
     with get_db_conn() as conn:
+        print('Vai cur')
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT access_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1",
                 (user_id,),
             )
             row = cur.fetchone()
+    print('Vai row' + str(row))        
     if not row:
         return "Token não encontrado.", 404
     access_token = row[0]
-
+    print('Vai row' + row[0]) 
     # 2) Obter todos os ITEM_IDs do vendedor
     print('Vai Chamar')
     item_ids = obter_item_ids(user_id, access_token)
