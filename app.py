@@ -142,6 +142,28 @@ def list_tokens():
         html += f"<li><b>ID:</b> {r[0]} | <b>access_token:</b> {r[1][:10]}... | <b>refresh_token:</b> {r[2][:10]}... | <b>created_at:</b> {r[3]}</li>"
     html += "</ul>"
     return html
+@app.route("/me")
+def get_me():
+    # Pega o último access_token
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT access_token FROM tokens ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return "Nenhum token encontrado.", 404
+
+    access_token = row[0]
+
+    # Chamada à API do Mercado Livre
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = requests.get("https://api.mercadolibre.com/users/me", headers=headers)
+
+    if response.status_code != 200:
+        return f"Erro ao acessar /users/me: {response.text}", 400
+
+    return response.json()
 
 # Configuração de execução compatível com Render
 if __name__ == "__main__":
