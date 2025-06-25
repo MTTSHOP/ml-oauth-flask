@@ -175,7 +175,7 @@ def painel_anuncios(user_id):
     data = response.json()
     html = f"<h2>Anúncios de {user_id}</h2><ul>"
     for item_id in data.get("results", []):
-        html += f"<li><a href='https://produto.mercadolivre.com.br/{item_id}' target='_blank'>{item_id}</a></li>"
+        html += f"<li><a href='https://www.mercadolivre.com.br/{item_id}' target='_blank'>{item_id}</a></li>"
     html += "</ul><a href='/painel'>Voltar ao painel</a>"
     return html
 
