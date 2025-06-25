@@ -53,7 +53,6 @@ def obter_item_ids(user_id: str, access_token: str):
     """Retorna a lista de ITEM_IDs de um vendedor."""
     url = f"https://api.mercadolibre.com/users/{user_id}/items/search"
     resp = requests.get(url, params={"access_token": access_token})
-    print("[DEBUG] /items/search status:", resp.status_code, resp.text[:200], user_id, flush=True)
     if resp.status_code != 200:
         print("[API] Falha ao buscar itens:", resp.text)
         return []
@@ -61,22 +60,22 @@ def obter_item_ids(user_id: str, access_token: str):
 
 
 def fetch_items_detalhes(item_ids, access_token):
+    """Busca detalhes em blocos de 20 IDs incluindo promoções e flag de catálogo."""
     detalhes = []
     for i in range(0, len(item_ids), 20):
-        chunk = item_ids[i:i+20]
+        chunk = item_ids[i : i + 20]
         url = "https://api.mercadolibre.com/items"
         params = {
             "ids": ",".join(chunk),
-            "attributes": "title,price,status,permalink"
+            # buscamos campos extras para promo e catálogo
+            "attributes": "title,price,original_price,sale_price,catalog_listing,status,permalink",
         }
         headers = {"Authorization": f"Bearer {access_token}"}
         resp = requests.get(url, params=params, headers=headers)
-        print("[DEBUG] /items chunk", i//20, "status", resp.status_code, flush=True)
-
+        print("[DEBUG] /items chunk", i // 20, "status", resp.status_code, flush=True)
         if resp.status_code != 200:
             print(resp.text[:300], flush=True)
             continue
-
         for itm in resp.json():
             if itm.get("code") == 200 and "body" in itm:
                 detalhes.append(itm["body"])
@@ -212,52 +211,60 @@ def painel_refresh(user_id):
 @app.route("/painel/anuncios/<user_id>")
 def painel_anuncios(user_id):
     # 1) Obter o access_token mais recente
-    print('Vai conn', user_id, flush=True)
     with get_db_conn() as conn:
-        print('Vai cur', user_id, flush=True)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT access_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1",
                 (user_id,),
             )
             row = cur.fetchone()
-    print('Vai row' + str(row))        
     if not row:
         return "Token não encontrado.", 404
     access_token = row[0]
-    print('Vai row' + row[0], user_id, flush=True) 
+
     # 2) Obter todos os ITEM_IDs do vendedor
-    print('Vai Chamar', user_id, flush=True)
     item_ids = obter_item_ids(user_id, access_token)
-    print('chamou', user_id, flush=True)
     if not item_ids:
         return "<p>Usuário sem anúncios encontrados.</p>"
-    
+
     # 3) Buscar detalhes em bloco
-    print('vai chamar det', user_id, flush=True)
-    detalhes = fetch_items_detalhes(item_ids, access_token )
-    print('chamou', user_id, flush=True)
+    detalhes = fetch_items_detalhes(item_ids)
 
     # Tradução de status
     traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
 
     html = f"<h2>Anúncios do usuário {user_id}</h2>"
-    html += "<table border='1' cellpadding='5'><tr>"
-    html += "<th>Título</th><th>Preço (R$)</th><th>Status</th><th>Link</th></tr>"
+    html += "<table border='1' cellpadding='5'>"
+    html += ("<tr>"
+             "<th>Título</th>"
+             "<th>Preço (R$)</th>"
+             "<th>Promoção (R$)</th>"
+             "<th>Catálogo?</th>"
+             "<th>Status</th>"
+             "<th>Link</th></tr>")
+
+    traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
 
     for d in detalhes:
         titulo = d.get("title", "–")
         preco = float(d.get("price", 0.0))
+        promo = d.get("sale_price") or (
+            preco if d.get("original_price") and d.get("original_price") > preco else None
+        )
+        promo_str = f"{promo:,.2f}" if promo else "–"
+        cat_flag = "Sim" if d.get("catalog_listing") else "Não"
         status = traduz.get(d.get("status", ""), d.get("status", ""))
         link = d.get("permalink", "#")
 
         html += "<tr>"
         html += f"<td>{titulo}</td>"
         html += f"<td>{preco:,.2f}</td>"
+        html += f"<td>{promo_str}</td>"
+        html += f"<td>{cat_flag}</td>"
         html += f"<td>{status}</td>"
         html += f"<td><a href='{link}' target='_blank'>Abrir</a></td>"
         html += "</tr>"
-    html += "</table><br><a href='/painel'>Voltar ao painel</a>"
+    html += "</table><br><a href='/painel'>Voltar ao painel</a>"<br><a href='/painel'>Voltar ao painel</a>"
     return html
 
 # -----------------------------------------------------------------------------
