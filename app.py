@@ -11,7 +11,7 @@ REDIRECT_URI = os.getenv("ML_REDIRECT_URI")
 @app.route("/")
 def home():
     url = (
-        "https://auth.mercadolibre.com.br/authorization"
+        "https://auth.mercadolivre.com.br/authorization"
         f"?response_type=code&client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}"
     )
     return f'<a href="{url}">Conectar com Mercado Livre</a>'
