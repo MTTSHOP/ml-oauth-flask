@@ -57,7 +57,7 @@ def callback():
         "redirect_uri": REDIRECT_URI,
     }
 
-    response = requests.post("https://api.mercadolivre.com/oauth/token", data=data)
+    response = requests.post("https://api.mercadolibre.com/oauth/token", data=data)
     if response.status_code != 200:
         return f"Erro ao obter token: {response.text}", 400
 
