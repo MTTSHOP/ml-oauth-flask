@@ -64,7 +64,9 @@ def fetch_items_detalhes(item_ids: list[str]):
     """Busca título, preço, status e permalink de vários itens em blocos de 20."""
     detalhes = []
     chunk_size = 20
+    print('dentro det', flush=True)
     for i in range(0, len(item_ids), chunk_size):
+        print('dentro for det', flush=True)
         chunk = item_ids[i : i + chunk_size]
         url = "https://api.mercadolibre.com/items"
         params = {
@@ -232,8 +234,9 @@ def painel_anuncios(user_id):
         return "<p>Usuário sem anúncios encontrados.</p>"
     
     # 3) Buscar detalhes em bloco
+    print('vai chamar det', user_id, flush=True)
     detalhes = fetch_items_detalhes(item_ids)
-    
+    print('chamou', user_id, flush=True)
 
     # Tradução de status
     traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
