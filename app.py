@@ -129,6 +129,20 @@ def refresh_token():
 
     return f"<h3>Token renovado com sucesso para user_id: {token_info.get('user_id')}</h3>"
 
+@app.route("/tokens")
+def list_tokens():
+    conn = sqlite3.connect("tokens.db")
+    c = conn.cursor()
+    c.execute("SELECT id, access_token, refresh_token, created_at FROM tokens ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+
+    html = "<h2>Tokens salvos:</h2><ul>"
+    for r in rows:
+        html += f"<li><b>ID:</b> {r[0]} | <b>access_token:</b> {r[1][:10]}... | <b>refresh_token:</b> {r[2][:10]}... | <b>created_at:</b> {r[3]}</li>"
+    html += "</ul>"
+    return html
+
 # Configuração de execução compatível com Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
