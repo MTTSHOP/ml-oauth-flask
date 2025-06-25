@@ -1,4 +1,5 @@
 import os
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokens.db")
 import sqlite3
 import requests
 from flask import Flask, request
@@ -13,7 +14,7 @@ REDIRECT_URI = os.getenv("ML_REDIRECT_URI")
 # Cria banco SQLite automaticamente se não existir
 def init_db():
     if not os.path.exists("tokens.db"):
-        conn = sqlite3.connect("tokens.db")
+        conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute('''
         CREATE TABLE IF NOT EXISTS tokens (
@@ -64,7 +65,7 @@ def callback():
     token_info = response.json()
 
     # Salva no banco
-    conn = sqlite3.connect("tokens.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
         INSERT INTO tokens (access_token, refresh_token, token_type, expires_in, scope, user_id)
@@ -85,7 +86,7 @@ def callback():
 @app.route("/refresh_token")
 def refresh_token():
     # Pega o último refresh_token salvo no banco
-    conn = sqlite3.connect("tokens.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT refresh_token FROM tokens ORDER BY id DESC LIMIT 1")
     row = c.fetchone()
@@ -111,7 +112,7 @@ def refresh_token():
     token_info = response.json()
 
     # Salva novo token no banco
-    conn = sqlite3.connect("tokens.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
         INSERT INTO tokens (access_token, refresh_token, token_type, expires_in, scope, user_id)
@@ -131,7 +132,7 @@ def refresh_token():
 
 @app.route("/tokens")
 def list_tokens():
-    conn = sqlite3.connect("tokens.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, access_token, refresh_token, created_at FROM tokens ORDER BY id DESC")
     rows = c.fetchall()
