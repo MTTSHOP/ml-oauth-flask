@@ -159,8 +159,55 @@ def listar_anuncios_user(user_id):
         "total_anuncios": data.get("paging", {}).get("total", 0),
         "ids": data.get("results", [])
     }
+@app.route("/refresh/<user_id>")
+def refresh_token(user_id):
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT refresh_token FROM tokens WHERE user_id = %s ORDER BY id DESC LIMIT 1", (user_id,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close()
+        conn.close()
+        return f"Nenhum refresh_token encontrado para user_id {user_id}", 404
+
+    refresh_token_val = row[0]
+    cur.close()
+    conn.close()
+
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "refresh_token": refresh_token_val,
+    }
+
+    response = requests.post("https://api.mercadolibre.com/oauth/token", data=data)
+    if response.status_code != 200:
+        return f"Erro ao renovar token: {response.text}", 400
+
+    token_info = response.json()
+
+    # Salva novo token no banco
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        INSERT INTO tokens (access_token, refresh_token, token_type, expires_in, scope, user_id)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    ''', (
+        token_info.get("access_token"),
+        token_info.get("refresh_token"),
+        token_info.get("token_type"),
+        token_info.get("expires_in"),
+        token_info.get("scope"),
+        str(token_info.get("user_id"))
+    ))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return f"Token renovado com sucesso para user_id {user_id}"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-    
