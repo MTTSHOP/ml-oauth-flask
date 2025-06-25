@@ -264,7 +264,7 @@ def painel_anuncios(user_id):
         html += f"<td>{status}</td>"
         html += f"<td><a href='{link}' target='_blank'>Abrir</a></td>"
         html += "</tr>"
-    html += "</table><br><a href='/painel'>Voltar ao painel</a>"<br><a href='/painel'>Voltar ao painel</a>"
+        html += "</table><br><a href='/painel'>Voltar ao painel</a>"
     return html
 
 # -----------------------------------------------------------------------------
