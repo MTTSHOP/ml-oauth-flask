@@ -52,6 +52,7 @@ except Exception as exc:
 def obter_item_ids(user_id: str, access_token: str):
     """Retorna a lista de ITEM_IDs de um vendedor."""
     url = f"https://api.mercadolibre.com/users/{user_id}/items/search"
+    print("[DEBUG] /items/search status:", resp.status_code, resp.text[:200])
     resp = requests.get(url, params={"access_token": access_token})
     if resp.status_code != 200:
         print("[API] Falha ao buscar itens:", resp.text)
