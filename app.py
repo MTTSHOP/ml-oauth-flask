@@ -60,27 +60,27 @@ def obter_item_ids(user_id: str, access_token: str):
     return resp.json().get("results", [])
 
 
-def fetch_items_detalhes(item_ids: list[str]):
-    """Busca título, preço, status e permalink de vários itens em blocos de 20."""
+def fetch_items_detalhes(item_ids, access_token):
     detalhes = []
-    chunk_size = 20
-    print('dentro det', flush=True)
-    for i in range(0, len(item_ids), chunk_size):
-        print('dentro for det', flush=True)
-        chunk = item_ids[i : i + chunk_size]
+    for i in range(0, len(item_ids), 20):
+        chunk = item_ids[i:i+20]
         url = "https://api.mercadolibre.com/items"
         params = {
             "ids": ",".join(chunk),
-            "attributes": "title,price,status,permalink",
+            "attributes": "title,price,status,permalink"
         }
-        resp = requests.get(url, params=params)
-       
+        headers = {"Authorization": f"Bearer {access_token}"}
+        resp = requests.get(url, params=params, headers=headers)
+        print("[DEBUG] /items chunk", i//20, "status", resp.status_code, flush=True)
+
         if resp.status_code != 200:
-            print("[API] Erro /items:", resp.status_code, resp.text)
+            print(resp.text[:300], flush=True)
             continue
+
         for itm in resp.json():
             if itm.get("code") == 200 and "body" in itm:
                 detalhes.append(itm["body"])
+    print("[DEBUG] total detalhes =", len(detalhes), flush=True)
     return detalhes
 
 # -----------------------------------------------------------------------------
@@ -235,7 +235,7 @@ def painel_anuncios(user_id):
     
     # 3) Buscar detalhes em bloco
     print('vai chamar det', user_id, flush=True)
-    detalhes = fetch_items_detalhes(item_ids)
+    detalhes = fetch_items_detalhes(item_ids, access_token )
     print('chamou', user_id, flush=True)
 
     # Tradução de status
