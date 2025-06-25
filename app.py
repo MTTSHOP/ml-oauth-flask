@@ -160,10 +160,41 @@ def get_me():
     headers = {"Authorization": f"Bearer {access_token}"}
     response = requests.get("https://api.mercadolibre.com/users/me", headers=headers)
 
+
     if response.status_code != 200:
         return f"Erro ao acessar /users/me: {response.text}", 400
 
     return response.json()
+
+@app.route("/me/anuncios")
+def listar_anuncios():
+    # Pega o último token e user_id
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT access_token, user_id FROM tokens ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return "Nenhum token encontrado.", 404
+
+    access_token, user_id = row
+    url = f"https://api.mercadolibre.com/users/{user_id}/items/search"
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        return f"Erro ao buscar anúncios: {response.text}", 400
+
+    data = response.json()
+    total = data.get("paging", {}).get("total", 0)
+    items = data.get("results", [])
+
+    return {
+        "total_anuncios": total,
+        "ids": items
+    }
 
 @app.route("/debug_db")
 def debug_db():
