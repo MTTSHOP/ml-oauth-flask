@@ -228,7 +228,7 @@ def painel_anuncios(user_id):
         return "<p>Usuário sem anúncios encontrados.</p>"
 
     # 3) Buscar detalhes em bloco
-    detalhes = fetch_items_detalhes(item_ids)
+    detalhes = fetch_items_detalhes(item_ids, access_token)
 
     # Tradução de status
     traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
