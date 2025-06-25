@@ -1,11 +1,10 @@
 import os
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokens.db")
 import sqlite3
 import requests
 from flask import Flask, request
 
 app = Flask(__name__)
-
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokens.db")
 # Variáveis de ambiente (Render define via painel ou render.yaml)
 CLIENT_ID = os.getenv("ML_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET")
