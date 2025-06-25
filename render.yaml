@@ -1,13 +1,13 @@
 services:
   - type: web
-    name: seuapp
+    name: ml-oauth-flask
     env: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app.py"
     envVars:
       - key: ML_CLIENT_ID
-        value: "seu_client_id"
+        value: "1726444833164979"
       - key: ML_CLIENT_SECRET
-        value: "seu_client_secret"
+        value: "SaCa1RUtqQjQwL8HnXqIYI3B0j4Tw4Bk"
       - key: ML_REDIRECT_URI
-        value: "https://seuapp.onrender.com/callback"
+        value: "https://ml-oauth-flask.onrender.com/callback"
