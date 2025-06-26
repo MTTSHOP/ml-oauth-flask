@@ -210,7 +210,7 @@ def painel_refresh(user_id):
 
 @app.route("/painel/anuncios/<user_id>")
 def painel_anuncios(user_id):
-    # 1) Obter o access_token mais recente
+    # 1) Access-token mais recente
     with get_db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -222,49 +222,68 @@ def painel_anuncios(user_id):
         return "Token não encontrado.", 404
     access_token = row[0]
 
-    # 2) Obter todos os ITEM_IDs do vendedor
+    # 2) ITEM_IDs do vendedor
     item_ids = obter_item_ids(user_id, access_token)
     if not item_ids:
         return "<p>Usuário sem anúncios encontrados.</p>"
 
-    # 3) Buscar detalhes em bloco
+    # 3) Detalhes em bloco
     detalhes = fetch_items_detalhes(item_ids, access_token)
 
-    # Tradução de status
-    traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
+    # --- HTML ---
+    traduz_status = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
 
-    html = f"<h2>Anúncios do usuário {user_id}</h2>"
-    html += "<table border='1' cellpadding='5'>"
-    html += ("<tr>"
-             "<th>Título</th>"
-             "<th>Preço (R$)</th>"
-             "<th>Promoção (R$)</th>"
-             "<th>Catálogo?</th>"
-             "<th>Status</th>"
-             "<th>Link</th></tr>")
+    html = f"""
+    <style>
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            font-family: Arial, sans-serif;
+        }}
+        th, td {{
+            border: 1px solid #ddd;
+            padding: 8px;
+        }}
+        th {{ background: #f5f5f5; }}
+        tr:nth-child(even) {{ background: #fafafa; }}
+        tr:hover {{ background: #f1f1f1; }}
+    </style>
 
-    traduz = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
+    <h2>Anúncios do usuário {user_id}</h2>
+    <table>
+        <tr>
+            <th>Título</th>
+            <th>Preço&nbsp;(R$)</th>
+            <th>Promoção&nbsp;(R$)</th>
+            <th>Catálogo?</th>
+            <th>Status</th>
+            <th>Link</th>
+        </tr>
+    """
 
     for d in detalhes:
-        titulo = d.get("title", "–")
-        preco = float(d.get("price", 0.0))
-        promo = d.get("sale_price") or (
+        titulo  = d.get("title", "–")
+        preco   = float(d.get("price", 0))
+        promo   = d.get("sale_price") or (
             preco if d.get("original_price") and d.get("original_price") > preco else None
         )
-        promo_str = f"{promo:,.2f}" if promo else "–"
-        cat_flag = "Sim" if d.get("catalog_listing") else "Não"
-        status = traduz.get(d.get("status", ""), d.get("status", ""))
-        link = d.get("permalink", "#")
+        promo_str = f"{promo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if promo else "–"
 
-        html += "<tr>"
-        html += f"<td>{titulo}</td>"
-        html += f"<td>{preco:,.2f}</td>"
-        html += f"<td>{promo_str}</td>"
-        html += f"<td>{cat_flag}</td>"
-        html += f"<td>{status}</td>"
-        html += f"<td><a href='{link}' target='_blank'>Abrir</a></td>"
-        html += "</tr>"
-        html += "</table><br><a href='/painel'>Voltar ao painel</a>"
+        html += f"""
+        <tr>
+            <td>{titulo}</td>
+            <td>{preco:,.2f}</td>
+            <td>{promo_str}</td>
+            <td>{"Sim" if d.get("catalog_listing") else "Não"}</td>
+            <td>{traduz_status.get(d.get("status", ""), d.get("status", ""))}</td>
+            <td><a href="{d.get("permalink", "#")}" target="_blank">Abrir</a></td>
+        </tr>
+        """
+
+    html += """
+    </table>
+    <br><a href="/painel">Voltar ao painel</a>
+    """
     return html
 
 # -----------------------------------------------------------------------------
