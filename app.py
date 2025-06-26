@@ -84,20 +84,30 @@ def fetch_items_detalhes(item_ids, access_token):
 
 
 def fetch_sale_prices(item_ids, access_token):
-    """Retorna dict {item_id: {amount, regular_amount, promotion_type, ...}}"""
-    print("[DEBUG]  entrou sales", flush=True)
+    """Retorna dict {item_id: {amount, regular_amount, promotion_type, ...}}
+    Usa o access_token como parâmetro de query porque o endpoint de preço
+    promocional não aceita o cabeçalho Authorization Bearer em todos os
+    ambientes."""
     prices = {}
-    headers = {"Authorization": f"Bearer {access_token}"}
     for iid in item_ids:
         url = f"https://api.mercadolibre.com/items/{iid}/sale_price"
-        params = {"context": "channel_marketplace"}
-        r = requests.get(url, params=params, headers=headers, timeout=5)
-        print("[DEBUG]  ret",  r.status_code, r.text, flush=True)
+        params = {
+            "access_token": access_token,               # token na querystring
+            "context": "channel_marketplace",          # contexto do marketplace
+        }
+        try:
+            r = requests.get(url, params=params, timeout=5)
+        except requests.RequestException as exc:
+            print(f"[SALE_PRICE] erro de rede para {iid}: {exc}")
+            continue
+
         if r.status_code == 200:
             prices[iid] = r.json()
+        elif r.status_code == 404:
+            # 404 → item sem promoção ativa. Mantemos explicitamente None para diferenciar.
+            prices[iid] = None
         else:
-            # 404 significa que o item não tem preço promocional
-            print("[DEBUG] sem promoção para", iid, "status", r.status_code)
+            print(f"[SALE_PRICE] {iid} status {r.status_code}: {r.text[:120]}")
     return prices
 
 # -----------------------------------------------------------------------------
