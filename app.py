@@ -60,18 +60,18 @@ def obter_item_ids(user_id: str, access_token: str):
 
 
 def fetch_items_detalhes(item_ids, access_token):
-    """Busca detalhes em blocos de 20 IDs incluindo promoções e flag de catálogo."""
+    """Busca detalhes (title, price, catálogo, status ...) em blocos de 20 IDs."""
     detalhes = []
     for i in range(0, len(item_ids), 20):
         chunk = item_ids[i : i + 20]
         url = "https://api.mercadolibre.com/items"
         params = {
             "ids": ",".join(chunk),
-            # buscamos campos extras para promo e catálogo
-            "attributes": "title,price,original_price,sale_price,catalog_listing,status,permalink",
+            # removemos sale_price (não existe nesse endpoint)
+            "attributes": "title,price,original_price,catalog_listing,status,permalink",
         }
         headers = {"Authorization": f"Bearer {access_token}"}
-        resp = requests.get(url, params=params, headers=headers)
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
         print("[DEBUG] /items chunk", i // 20, "status", resp.status_code, flush=True)
         if resp.status_code != 200:
             print(resp.text[:300], flush=True)
@@ -81,6 +81,22 @@ def fetch_items_detalhes(item_ids, access_token):
                 detalhes.append(itm["body"])
     print("[DEBUG] total detalhes =", len(detalhes), flush=True)
     return detalhes
+
+
+def fetch_sale_prices(item_ids, access_token):
+    """Retorna dict {item_id: {amount, regular_amount, promotion_type, ...}}"""
+    prices = {}
+    headers = {"Authorization": f"Bearer {access_token}"}
+    for iid in item_ids:
+        url = f"https://api.mercadolibre.com/items/{iid}/sale_price"
+        params = {"context": "channel_marketplace"}
+        r = requests.get(url, params=params, headers=headers, timeout=5)
+        if r.status_code == 200:
+            prices[iid] = r.json()
+        else:
+            # 404 significa que o item não tem preço promocional
+            print("[DEBUG] sem promoção para", iid, "status", r.status_code)
+    return prices
 
 # -----------------------------------------------------------------------------
 # Rotas Flask
@@ -230,6 +246,9 @@ def painel_anuncios(user_id):
     # 3) Detalhes em bloco
     detalhes = fetch_items_detalhes(item_ids, access_token)
 
+    # 4) Preços promocionais
+    sale_prices = fetch_sale_prices(item_ids, access_token)
+
     # --- HTML ---
     traduz_status = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
 
@@ -264,10 +283,16 @@ def painel_anuncios(user_id):
     for d in detalhes:
         titulo  = d.get("title", "–")
         preco   = float(d.get("price", 0))
-        promo   = d.get("sale_price") or (
-            preco if d.get("original_price") and d.get("original_price") > preco else None
+
+        # Promoção via API dedicada
+        sale_data = sale_prices.get(d.get("id"))
+        promo = None
+        if sale_data and sale_data.get("regular_amount"):
+            promo = sale_data.get("amount")
+        promo_str = (
+            f"{promo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            if promo is not None else "–"
         )
-        promo_str = f"{promo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if promo else "–"
 
         html += f"""
         <tr>
