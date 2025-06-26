@@ -85,12 +85,14 @@ def fetch_items_detalhes(item_ids, access_token):
 
 def fetch_sale_prices(item_ids, access_token):
     """Retorna dict {item_id: {amount, regular_amount, promotion_type, ...}}"""
+    print("[DEBUG]  entrou sales", flush=True)
     prices = {}
     headers = {"Authorization": f"Bearer {access_token}"}
     for iid in item_ids:
         url = f"https://api.mercadolibre.com/items/{iid}/sale_price"
         params = {"context": "channel_marketplace"}
         r = requests.get(url, params=params, headers=headers, timeout=5)
+        print("[DEBUG]  ret",  r.status_code, r.text, flush=True)
         if r.status_code == 200:
             prices[iid] = r.json()
         else:
