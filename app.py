@@ -1,123 +1,293 @@
 import os
-from datetime import datetime
+import json
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
-import psycopg2
 import requests
-from flask import Flask, request
+from flask import Flask, redirect, request, session, jsonify, url_for, abort
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Text,
+    TIMESTAMP,
+    create_engine,
+    func,
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
+from sqlalchemy.exc import SQLAlchemyError
 
-app = Flask(__name__)
+###############################################################################
+# Configuration helpers
+###############################################################################
 
+DB_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://user:password@localhost:5432/mercadolivre")
 CLIENT_ID = os.getenv("ML_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("ML_REDIRECT_URI")
-DATABASE_URL = os.getenv("DATABASE_URL")
+REDIRECT_URI = os.getenv("ML_REDIRECT_URI", "http://localhost:5000/callback")
+API_BASE = "https://api.mercadolibre.com"
 
-def get_db_conn():
-    return psycopg2.connect(DATABASE_URL)
+if not CLIENT_ID or not CLIENT_SECRET:
+    raise RuntimeError("Missing ML_CLIENT_ID or ML_CLIENT_SECRET env vars")
 
-# Tabela tokens
-with get_db_conn() as conn:
-    with conn.cursor() as c:
-        c.execute("""CREATE TABLE IF NOT EXISTS tokens (
-            id SERIAL PRIMARY KEY,
-            access_token TEXT NOT NULL,
-            refresh_token TEXT NOT NULL,
-            token_type TEXT,
-            expires_in INTEGER,
-            scope TEXT,
-            user_id TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-        conn.commit()
+SECRET_KEY = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 
-# --------------------------------------------------
-# Helpers Mercado Livre
-# --------------------------------------------------
+# Flask app
+app = Flask(__name__)
+app.secret_key = SECRET_KEY
 
-def obter_item_ids(user_id, token):
-    url = f"https://api.mercadolibre.com/users/{user_id}/items/search"
-    r = requests.get(url, params={"access_token": token})
-    app.logger.info("/items/search %s", r.status_code)
-    return r.json().get("results", []) if r.ok else []
+###############################################################################
+# Database setup (SQLAlchemy + PostgreSQL)
+###############################################################################
+
+engine = create_engine(DB_URL, pool_pre_ping=True)
+SessionLocal = scoped_session(sessionmaker(bind=engine, autoflush=False))
+Base = declarative_base()
 
 
-def fetch_items_detalhes(item_ids, token):
-    detalhes, step = [], 20
-    for i in range(0, len(item_ids), step):
-        chunk = item_ids[i : i + step]
-        r = requests.get(
-            "https://api.mercadolibre.com/items",
-            params={
-                "ids": ",".join(chunk),
-                "attributes": "title,price,original_price,sale_price,catalog_listing,status,permalink",
-            },
-            headers={"Authorization": f"Bearer {token}"},
+class Token(Base):
+    """Tokens table mapping (multi‑user)."""
+
+    __tablename__ = "tokens"
+
+    id = Column(Integer, primary_key=True)
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=False)
+    token_type = Column(String(50))
+    expires_in = Column(Integer)  # seconds
+    scope = Column(Text)
+    user_id = Column(String, nullable=False, index=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    @property
+    def expires_at(self) -> datetime:
+        """Return absolute expiration datetime in UTC."""
+        return self.created_at + timedelta(seconds=self.expires_in or 0)
+
+
+Base.metadata.create_all(engine)
+
+###############################################################################
+# OAuth helpers
+###############################################################################
+
+def _token_endpoint():
+    return f"{API_BASE}/oauth/token"
+
+
+def _auth_url(state: str) -> str:
+    params = {
+        "response_type": "code",
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "state": state,
+    }
+    return f"https://auth.mercadolivre.com.br/authorization?{urlencode(params)}"
+
+
+def _save_token(db, payload: dict, user_id: str):
+    token = (
+        db.query(Token).filter_by(user_id=user_id).order_by(Token.id.desc()).first()
+    )
+    if token:
+        # Update existing
+        token.access_token = payload["access_token"]
+        token.refresh_token = payload.get("refresh_token", token.refresh_token)
+        token.token_type = payload.get("token_type")
+        token.expires_in = payload.get("expires_in")
+        token.scope = payload.get("scope")
+        token.created_at = datetime.now(timezone.utc)
+    else:
+        token = Token(
+            access_token=payload["access_token"],
+            refresh_token=payload.get("refresh_token"),
+            token_type=payload.get("token_type"),
+            expires_in=payload.get("expires_in"),
+            scope=payload.get("scope"),
+            user_id=user_id,
         )
-        app.logger.info("/items multi %s", r.status_code)
-        if not r.ok:
-            continue
-        detalhes.extend([it["body"] for it in r.json() if it.get("code") == 200])
-    return detalhes
+        db.add(token)
+    db.commit()
+    return token
 
-STATUS_PT = {"active": "Ativo", "paused": "Pausado", "closed": "Finalizado"}
 
-# --------------------------------------------------
-# Rotas
-# --------------------------------------------------
+def _request_token(code: str):
+    payload = {
+        "grant_type": "authorization_code",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+    }
+    resp = requests.post(_token_endpoint(), data=payload, timeout=20)
+    if resp.status_code != 200:
+        abort(resp.status_code, resp.text)
+    return resp.json()
 
-@app.route("/painel/anuncios/<user_id>")
-def painel_anuncios(user_id):
-    # token
-    with get_db_conn() as conn:
-        with conn.cursor() as c:
-            c.execute("SELECT access_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1", (user_id,))
-            row = c.fetchone()
-    if not row:
-        return "Token não encontrado", 404
-    token = row[0]
 
-    item_ids = obter_item_ids(user_id, token)
-    if not item_ids:
-        return "<p>Usuário sem anúncios.</p>"
+def _refresh_token(token: Token):
+    payload = {
+        "grant_type": "refresh_token",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "refresh_token": token.refresh_token,
+    }
+    resp = requests.post(_token_endpoint(), data=payload, timeout=20)
+    if resp.status_code != 200:
+        abort(resp.status_code, resp.text)
+    return resp.json()
 
-    detalhes = fetch_items_detalhes(item_ids, token)
 
-    # monta HTML
-    html = """
-    <html><head><meta charset='utf-8'>
-    <style>
-      body{font-family:Arial,Helvetica,sans-serif}
-      table{border-collapse:collapse;width:100%}
-      th,td{border:1px solid #ccc;padding:6px}
-      th{background:#f2f2f2;text-align:left}
-    </style></head><body>
-    """
-    html += f"<h2>Anúncios do usuário {user_id}</h2>"
-    html += "<table><tr><th>Título</th><th>Preço (R$)</th><th>Promoção (R$)</th><th>Catálogo?</th><th>Status</th><th>Link</th></tr>"
+def get_token(user_id: str, db=None) -> Token:
+    """Return a valid (possibly refreshed) Token for user_id."""
+    close_session = False
+    if db is None:
+        db = SessionLocal()
+        close_session = True
+    token: Token | None = (
+        db.query(Token).filter_by(user_id=user_id).order_by(Token.id.desc()).first()
+    )
+    if not token:
+        abort(404, f"Token not found for user {user_id}")
 
-    for d in detalhes:
-        titulo = d.get("title", "–")
-        preco = float(d.get("price", 0))
-        promo = d.get("sale_price") or (
-            preco if d.get("original_price") and d.get("original_price") > preco else None
-        )
-        promo_str = f"{promo:,.2f}" if promo else "–"
-        catalogo = "Sim" if d.get("catalog_listing") else "Não"
-        status = STATUS_PT.get(d.get("status"), d.get("status"))
-        link = d.get("permalink", "#")
-        html += (
-            f"<tr><td>{titulo}</td>"
-            f"<td>{preco:,.2f}</td>"
-            f"<td>{promo_str}</td>"
-            f"<td>{catalogo}</td>"
-            f"<td>{status}</td>"
-            f"<td><a href='{link}' target='_blank'>Abrir</a></td></tr>"
-        )
+    # Refresh if needed (with 2‑minute buffer)
+    if token.expires_in and token.expires_at < datetime.now(timezone.utc) + timedelta(minutes=2):
+        payload = _refresh_token(token)
+        token = _save_token(db, payload, user_id)
 
-    html += "</table><br><a href='/painel'>Voltar ao painel</a></body></html>"
-    return html
+    if close_session:
+        db.close()
+    return token
 
-# -------------------- restante do arquivo (rotas /painel etc.) permanece igual --------------------
+###############################################################################
+# Flask routes
+###############################################################################
+
+@app.route("/")
+def index():
+    return {
+        "msg": "Mercado Livre OAuth + Promotions API",
+        "auth_url": url_for("login", _external=True),
+    }
+
+
+@app.route("/login")
+def login():
+    state = os.urandom(8).hex()
+    session["oauth_state"] = state
+    return redirect(_auth_url(state))
+
+
+@app.route("/callback")
+def callback():
+    state = request.args.get("state")
+    if state != session.get("oauth_state"):
+        abort(400, "Invalid state parameter")
+
+    code = request.args.get("code")
+    if not code:
+        abort(400, "Missing code param")
+
+    data = _request_token(code)
+
+    # Mercado Livre responde user_id dentro do JSON
+    user_id = str(data.get("user_id") or data.get("x_ml_user_id"))
+    if not user_id:
+        abort(400, "Couldn't find user_id in token response")
+
+    with SessionLocal() as db:
+        _save_token(db, data, user_id)
+
+    return {
+        "msg": "OAuth successful",
+        "user_id": user_id,
+    }
+
+
+###############################################################################
+# API proxies (prices & promotions)
+###############################################################################
+
+
+def ml_get(path: str, token: Token, params: dict | None = None, headers: dict | None = None):
+    headers = headers or {}
+    headers.update({"Authorization": f"Bearer {token.access_token}"})
+    url = f"{API_BASE}{path}"
+    resp = requests.get(url, headers=headers, params=params, timeout=20)
+    if resp.status_code == 401 and "expired" in resp.text.lower():
+        # Refresh and retry once
+        with SessionLocal() as db:
+            refreshed = _save_token(db, _refresh_token(token), token.user_id)
+        return ml_get(path, refreshed, params, headers)
+    resp.raise_for_status()
+    return resp.json()
+
+
+# 1) Get sale price for a single item
+@app.route("/items/<item_id>/price")
+def item_sale_price(item_id):
+    user_id = request.args.get("user_id")
+    if not user_id:
+        abort(400, "user_id query param required")
+
+    token = get_token(user_id)
+    data = ml_get(f"/items/{item_id}/sale_price", token, params={"context": "channel_marketplace"})
+    return jsonify(data)
+
+
+# 2) List active seller promotions for user
+@app.route("/promotions")
+def list_promotions():
+    user_id = request.args.get("user_id")
+    if not user_id:
+        abort(400, "user_id query param required")
+    token = get_token(user_id)
+
+    data = ml_get(
+        f"/marketplace/seller-promotions/users/{user_id}",
+        token,
+        headers={"version": "v2"},
+    )
+    return jsonify(data)
+
+
+# 3) List items inside a promotion (e.g., DEAL, DOD)
+@app.route("/promotions/<promotion_id>/items")
+def promotion_items(promotion_id):
+    user_id = request.args.get("user_id")
+    promotion_type = request.args.get("promotion_type", "DEAL")  # DEAL, DOD, PRICE_DISCOUNT etc.
+    status_filter = request.args.get("status", "started")  # started, candidate, ended...
+
+    token = get_token(user_id)
+    params = {
+        "user_id": user_id,
+        "status": status_filter,
+        "promotion_type": promotion_type,
+    }
+
+    data = ml_get(
+        f"/marketplace/seller-promotions/promotions/{promotion_id}/items",
+        token,
+        params=params,
+        headers={"version": "v2"},
+    )
+    return jsonify(data)
+
+###############################################################################
+# Error handling + helpers
+###############################################################################
+
+@app.errorhandler(SQLAlchemyError)
+@app.errorhandler(requests.RequestException)
+def handle_error(err):
+    app.logger.exception(err)
+    return {
+        "error": str(err),
+    }, 500
+
+###############################################################################
+# Entry‑point
+###############################################################################
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
