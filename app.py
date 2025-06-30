@@ -294,7 +294,7 @@ def painel_anuncios(user_id):
 
     for d in detalhes:
         titulo  = d.get("title", "–")
-        preco   = float(d.get("price", 0))
+        preco   = float(d.get("price", 0))  
 
         # Promoção via API dedicada
         sale_data = sale_prices.get(d.get("id"))
