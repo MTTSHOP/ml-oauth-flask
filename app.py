@@ -298,6 +298,7 @@ def painel_anuncios(user_id):
 
         # Promoção via API dedicada
         sale_data = sale_prices.get(d.get("id"))
+        print(d)
         promo = None
         if sale_data and sale_data.get("regular_amount"):
             promo = sale_data.get("amount")
