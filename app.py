@@ -68,7 +68,7 @@ def fetch_items_detalhes(item_ids, access_token):
         params = {
             "ids": ",".join(chunk),
             # removemos sale_price (não existe nesse endpoint)
-            "attributes": "title,price,original_price,catalog_listing,status,permalink",
+            "attributes": "id,title,price,original_price,catalog_listing,status,permalink",
         }
         headers = {"Authorization": f"Bearer {access_token}"}
         resp = requests.get(url, params=params, headers=headers, timeout=10)
@@ -294,11 +294,10 @@ def painel_anuncios(user_id):
 
     for d in detalhes:
         titulo  = d.get("title", "–")
-        preco   = float(d.get("price", 0))  
+        preco   = float(d.get("price", 0))
 
         # Promoção via API dedicada
         sale_data = sale_prices.get(d.get("id"))
-        print(d)
         promo = None
         if sale_data and sale_data.get("regular_amount"):
             promo = sale_data.get("amount")
