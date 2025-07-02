@@ -324,6 +324,18 @@ def painel_anuncios(user_id):
     """
     return html
 
+@app.route("/api/token/<user_id>")
+def obter_token(user_id):
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT access_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return {"error": "Token não encontrado"}, 404
+    return {"access_token": row[0]}
 
 # -----------------------------------------------------------------------------
 
