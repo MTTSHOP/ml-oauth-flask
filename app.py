@@ -4,11 +4,7 @@ from datetime import datetime
 import psycopg2
 import requests
 from flask import Flask, request
-from PIL import Image
-from io import BytesIO
-from sentence_transformers import SentenceTransformer, util
 
-clip_model = SentenceTransformer("clip-ViT-B-32")
 app = Flask(__name__)
 
 # -----------------------------------------------------------------------------
@@ -328,65 +324,7 @@ def painel_anuncios(user_id):
     """
     return html
 
-@app.route("/similaridade/<user_id>", methods=["GET", "POST"])
-def verificar_similaridade(user_id):
-    html_upload = """
-    <h2>Comparar Anúncios por Similaridade de Imagem</h2>
-    <form method="POST" enctype="multipart/form-data">
-        <input type="file" name="imagem" accept="image/*" required>
-        <button type="submit">Comparar</button>
-    </form>
-    """
 
-    if request.method == "GET":
-        return html_upload
-
-    file = request.files.get("imagem")
-    if not file:
-        return "Erro: nenhuma imagem enviada."
-
-    imagem_referencia = Image.open(file.stream).convert("RGB")
-    emb_referencia = clip_model.encode(imagem_referencia, convert_to_tensor=True)
-
-    # 1) Buscar token
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT access_token FROM tokens WHERE user_id=%s ORDER BY id DESC LIMIT 1",
-                (user_id,),
-            )
-            row = cur.fetchone()
-    if not row:
-        return "Token não encontrado.", 404
-    token = row[0]
-
-    # 2) Buscar anúncios
-    item_ids = obter_item_ids(user_id, token)
-    detalhes = fetch_items_detalhes(item_ids, token)
-
-    resultados = []
-    for item in detalhes:
-        thumb_url = item.get("thumbnail")
-        if not thumb_url:
-            continue
-        try:
-            r = requests.get(thumb_url.replace("http://", "https://"), timeout=10)
-            imagem_anuncio = Image.open(BytesIO(r.content)).convert("RGB")
-            emb_item = clip_model.encode(imagem_anuncio, convert_to_tensor=True)
-            score = util.cos_sim(emb_referencia, emb_item).item()
-            resultados.append((item["title"], item["permalink"], score))
-        except Exception as e:
-            print(f"[IMG ERROR] {e}")
-            continue
-
-    resultados = sorted(resultados, key=lambda x: x[2], reverse=True)[:10]
-
-    html_resultado = "<h3>Resultados mais semelhantes:</h3><ul>"
-    for titulo, link, score in resultados:
-        html_resultado += f"<li><a href='{link}' target='_blank'>{titulo}</a> — Score: {score:.4f}</li>"
-    html_resultado += "</ul><br><a href='/painel'>Voltar</a>"
-
-    return html_resultado
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
