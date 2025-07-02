@@ -97,6 +97,7 @@ def fetch_sale_prices(item_ids, access_token):
         }
         try:
             r = requests.get(url, params=params, timeout=5)
+            print(r)
         except requests.RequestException as exc:
             print(f"[SALE_PRICE] erro de rede para {iid}: {exc}")
             continue
