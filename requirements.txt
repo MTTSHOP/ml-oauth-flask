@@ -1,3 +1,9 @@
-flask
+Flask
 requests
 psycopg2-binary
+Pillow
+gunicorn
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
+sentence-transformers
+--extra-index-url https://download.pytorch.org/whl/cpu
