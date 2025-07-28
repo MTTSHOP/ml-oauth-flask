@@ -6,8 +6,8 @@ services:
     startCommand: "python app.py"
     envVars:
       - key: ML_CLIENT_ID
-        value: "1726444833164979"
+        value: "6426991503346208"
       - key: ML_CLIENT_SECRET
-        value: "SaCa1RUtqQjQwL8HnXqIYI3B0j4Tw4Bk"
+        value: "gJ5JzqdEIIQFmvRmaxozwaE7hrOFWhkE"
       - key: ML_REDIRECT_URI
         value: "https://ml-oauth-flask.onrender.com/callback"
