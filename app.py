@@ -146,24 +146,8 @@ def callback():
         return f"Erro ao trocar código: {resp.text}", 400
 
     tok = resp.json()
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO tokens (access_token, refresh_token, token_type, expires_in, scope, user_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    tok.get("access_token"),
-                    tok.get("refresh_token"),
-                    tok.get("token_type"),
-                    tok.get("expires_in"),
-                    tok.get("scope"),
-                    str(tok.get("user_id")),
-                ),
-            )
-            conn.commit()
-    return "Token salvo com sucesso. <a href='/painel'>Ir ao painel</a>"
+   
+    return f"Token salvo com sucesso.{tok} <a href='/painel'>Ir ao painel</a>"
 
 # ----------------- Painel de usuários -----------------
 
